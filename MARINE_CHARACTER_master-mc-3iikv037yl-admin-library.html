@@ -26,7 +26,7 @@ button:active,.filebtn:active{transform:translateY(1px)}
 #lock h2{margin-top:0;color:#0878bd}.hidden{display:none!important}
 .imgtools{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:5px 0}
 .imgtools input[type=file]{max-width:360px}
-.notice{padding:9px;border-radius:10px;background:#e9f8ff;font-size:12px}
+.notice{padding:9px;border-radius:10px;background:#e9f8ff;font-size:12px}.switch{display:flex;gap:8px;align-items:center;background:var(--soft);padding:9px;border-radius:10px}.switch input{width:auto}.warn{color:#9a5a00;font-weight:700}
 </style>
 </head>
 <body>
@@ -42,7 +42,7 @@ button:active,.filebtn:active{transform:translateY(1px)}
 
 <main id="app" class="hidden">
 <h1>🐠 MARINE CHARACTER MASTER</h1>
-<div class="small">MASTER更新：2026/09/04　管理・保存・背景同期強化版 <span id="saveStatus" class="status"></span></div>
+<div class="small">MASTER更新：<span id="masterUpdated">-</span>　管理・保存・公開書き出し強化版 <span id="saveStatus" class="status"></span></div>
 
 <div class="box">
   <h2>🌊 共通キャラクター画像ライブラリ</h2>
@@ -54,8 +54,8 @@ button:active,.filebtn:active{transform:translateY(1px)}
   <div class="notice">編集内容はこのブラウザに自動保存します。画像も保存対象です。別端末やブラウザ移行用にはバックアップJSONも使えます。</div>
   <div class="row">
     <button id="saveNow" class="good">💾 今すぐ保存</button>
-    <button id="backup">📦 MASTERバックアップ</button>
-    <label class="filebtn">📥 バックアップ読込<input id="restore" type="file" accept=".json,application/json" hidden></label>
+    <button id="backup">📤 MASTER JSON書き出し</button>
+    <label class="filebtn">📥 MASTER JSON読込<input id="restore" type="file" accept=".json,application/json" hidden></label>
     <button id="clearSaved" class="danger">保存データを消去</button>
   </div>
 </div>
@@ -76,7 +76,9 @@ button:active,.filebtn:active{transform:translateY(1px)}
     <label>最大辺(px)<input id="maxPx" type="number" value="256" min="64" max="2048"></label>
     <label>WebP画質<input id="quality" type="number" value="0.78" min=".3" max="1" step=".01"></label>
   </div>
-  <div class="small">元画像はMASTER保存では保持。characters.jsonへ書き出す画像だけ縮小・WebP圧縮します。</div>
+  <div class="small">元画像はMASTER保存では保持。公開JSON / 公開HTMLへ書き出す画像だけ縮小・WebP圧縮します。</div>
+  <label class="switch"><input id="allowImageSave" type="checkbox"> 公開側で画像保存を許可する</label>
+  <div class="small warn">OFF時は公開HTMLの保存ボタン・右クリック・ドラッグを抑止します。ブラウザの仕組み上、完全なコピー防止はできません。</div>
 </div>
 
 <div class="box"><h2>🐠 キャラクター登録</h2><div id="list"></div><button id="add">＋ キャラクター追加</button></div>
@@ -84,7 +86,8 @@ button:active,.filebtn:active{transform:translateY(1px)}
 <div class="box">
   <h2>📦 公開データ書き出し</h2>
   <button id="exportBtn">characters.json を書き出す</button>
-  <div class="small">各アプリはこのJSONから、固定ID・名前・軽量画像・用途設定を読み取れます。</div>
+  <button id="exportHtml" class="good">🌐 公開HTMLを書き出す</button>
+  <div class="small">JSONは各アプリ連携用。公開HTMLは現在のキャラクター・軽量画像・並び順・更新日時・画像保存許可設定を1ファイルに埋め込みます。</div>
 </div>
 </main>
 
@@ -94,6 +97,7 @@ const STORAGE_KEY="marine_character_master_v2";
 const THEME_KEY="marine_theme_cache_v1";
 let chars=[];
 let saveTimer=null;
+const BUILD_UPDATED="2026-09-04T02:14:00+09:00";
 
 const $=id=>document.getElementById(id);
 const E=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -102,10 +106,10 @@ function download(name,text,type="application/json;charset=utf-8"){
   const blob=new Blob([text],{type}),u=URL.createObjectURL(blob),a=document.createElement("a");
   a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1200)
 }
-function state(){return{schema:"marine-character-master-v2",updated:new Date().toISOString(),maxPx:+$("maxPx").value||256,quality:+$("quality").value||.78,characters:chars}}
+function state(){return{schema:"marine-character-master-v3",updated:new Date().toISOString(),maxPx:+$("maxPx").value||256,quality:+$("quality").value||.78,allowImageSave:$("allowImageSave").checked,characters:chars}}
 function save(show=true){
   try{
-    localStorage.setItem(STORAGE_KEY,JSON.stringify(state()));
+    const st=state();localStorage.setItem(STORAGE_KEY,JSON.stringify(st));$("masterUpdated").textContent=new Date(st.updated).toLocaleString("ja-JP");
     if(show){$("saveStatus").textContent="保存しました ✓";setTimeout(()=>$("saveStatus").textContent="",1800)}
   }catch(err){
     $("saveStatus").textContent="保存容量を超えた可能性があります";
@@ -114,12 +118,13 @@ function save(show=true){
 }
 function autoSave(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>save(false),350)}
 function loadSaved(){
+  $("masterUpdated").textContent=new Date(BUILD_UPDATED).toLocaleString("ja-JP");
   try{
     const raw=localStorage.getItem(STORAGE_KEY); if(!raw)return;
     const d=JSON.parse(raw);
     chars=Array.isArray(d.characters)?d.characters:[];
     if(d.maxPx)$("maxPx").value=d.maxPx;
-    if(d.quality)$("quality").value=d.quality;
+    if(d.quality)$("quality").value=d.quality;$("allowImageSave").checked=!!d.allowImageSave;if(d.updated)$("masterUpdated").textContent=new Date(d.updated).toLocaleString("ja-JP");
   }catch(e){}
 }
 function render(){
@@ -161,13 +166,13 @@ $("list").onclick=e=>{
   }
 };
 $("add").onclick=()=>{chars.push({id:uid(),name:"",src:"",icon:true,medicine:true,sugoroku:true,active:true});render();autoSave()};
-$("maxPx").oninput=autoSave;$("quality").oninput=autoSave;
+$("maxPx").oninput=autoSave;$("quality").oninput=autoSave;$("allowImageSave").onchange=autoSave;
 $("saveNow").onclick=()=>save(true);
 
 $("backup").onclick=()=>download("marine-character-master-backup-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify(state(),null,2));
 $("restore").onchange=e=>{
   const f=e.target.files[0];if(!f)return;const r=new FileReader();
-  r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.characters))throw 0;chars=d.characters;if(d.maxPx)$("maxPx").value=d.maxPx;if(d.quality)$("quality").value=d.quality;render();save(true);alert("MASTERバックアップを復元しました。")}catch(_){alert("対応したバックアップJSONではありません。")}};
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.characters))throw 0;chars=d.characters;if(d.maxPx)$("maxPx").value=d.maxPx;if(d.quality)$("quality").value=d.quality;$("allowImageSave").checked=!!d.allowImageSave;render();save(true);alert("MASTER JSONを読み込みました。")}catch(_){alert("対応したバックアップJSONではありません。")}};
   r.readAsText(f);e.target.value=""
 };
 $("clearSaved").onclick=()=>{if(confirm("このブラウザに保存したキャラクターMASTERデータを消去しますか？")){localStorage.removeItem(STORAGE_KEY);chars=[];render();$("saveStatus").textContent="保存データを消去しました"}};
@@ -213,12 +218,29 @@ async function compress(src,max,q){
   c.width=w;c.height=h;c.getContext("2d").drawImage(im,0,0,w,h);return c.toDataURL("image/webp",q)
 }
 $("exportBtn").onclick=async()=>{
-  const out={schema:"marine-characters-v1",updated:new Date().toISOString(),characters:[]},max=+$("maxPx").value||256,q=+$("quality").value||.78;
   $("exportBtn").disabled=true;$("exportBtn").textContent="書き出し中…";
+  try{const out=await publicData();download("characters.json",JSON.stringify(out,null,2))}
+  finally{$("exportBtn").disabled=false;$("exportBtn").textContent="characters.json を書き出す"}
+};
+
+
+async function publicData(){
+  const out={schema:"marine-characters-v2",updated:new Date().toISOString(),allowImageSave:$("allowImageSave").checked,characters:[]};
+  const max=+$("maxPx").value||256,q=+$("quality").value||.78;
+  for(const x of chars){
+    if(!x.active)continue;
+    out.characters.push({id:x.id,name:x.name,image:await compress(x.src,max,q),uses:{icon:!!x.icon,medicine:!!x.medicine,sugoroku:!!x.sugoroku},active:true});
+  }
+  return out;
+}
+function escScriptJSON(obj){return JSON.stringify(obj).replace(/</g,"\\u003c").replace(/-->/g,"--\\u003e")}
+$("exportHtml").onclick=async()=>{
+  const b=$("exportHtml");b.disabled=true;b.textContent="公開HTML作成中…";
   try{
-    for(const x of chars)out.characters.push({id:x.id,name:x.name,image:await compress(x.src,max,q),uses:{icon:x.icon,medicine:x.medicine,sugoroku:x.sugoroku},active:x.active});
-    download("characters.json",JSON.stringify(out,null,2))
-  }finally{$("exportBtn").disabled=false;$("exportBtn").textContent="characters.json を書き出す"}
+    const data=await publicData(), json=escScriptJSON(data);
+    const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MARINE CHARACTER</title><style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;background:#eaf7ff;color:#123}main{max-width:1000px;margin:auto;padding:18px}h1{color:#0878bd}.meta{font-size:12px;color:#567}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:18px}.card{background:#fff;border:2px solid #9bd6f4;border-radius:18px;padding:14px;text-align:center}.card img{width:120px;height:120px;object-fit:contain;border-radius:50%;background:#eef9ff;max-width:100%}.name{font-weight:900;margin:8px 0}.uses{font-size:11px;color:#567}.save{display:inline-block;margin-top:8px;padding:7px 10px;border-radius:9px;background:#1686c9;color:#fff;text-decoration:none;font-weight:800}</style></head><body><main><h1>🐠 MARINE CHARACTER</h1><div class="meta" id="meta"></div><div class="grid" id="grid"></div></main><script>const DATA=${json};const allow=!!DATA.allowImageSave;document.getElementById("meta").textContent="更新："+new Date(DATA.updated).toLocaleString("ja-JP");const g=document.getElementById("grid");for(const x of DATA.characters){const d=document.createElement("div");d.className="card";const im=x.image?'<img src="'+x.image+'" alt="">':'';const u=[x.uses.icon?'アイコン':'',x.uses.medicine?'服用スタンプ':'',x.uses.sugoroku?'すごろく':''].filter(Boolean).join(' / ');d.innerHTML=im+'<div class="name"></div><div class="uses"></div>'+(allow&&x.image?'<a class="save" download="'+(x.id||'character')+'.webp" href="'+x.image+'">画像を保存</a>':'');d.querySelector('.name').textContent=x.name||'キャラクター';d.querySelector('.uses').textContent=u;const img=d.querySelector('img');if(img&&!allow){img.draggable=false;img.addEventListener('contextmenu',e=>e.preventDefault())}g.appendChild(d)}if(!allow)document.addEventListener('contextmenu',e=>{if(e.target.tagName==='IMG')e.preventDefault()});<\/script></body></html>`;
+    download("MARINE_CHARACTER_public-"+new Date().toISOString().slice(0,10)+".html",html,"text/html;charset=utf-8");
+  }finally{b.disabled=false;b.textContent="🌐 公開HTMLを書き出す"}
 };
 
 function unlock(){
